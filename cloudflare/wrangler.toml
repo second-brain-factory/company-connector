@@ -1,0 +1,16 @@
+name = "second-brain-connector"
+main = "connector.js"
+compatibility_date = "2025-09-01"
+workers_dev = false
+
+[vars]
+CONNECTOR_BASE = "https://setup.example.com"
+DEPLOY_REPO = "second-brain-connector"
+EMAIL_FROM = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "second-brain-connector"
+
+[triggers]
+crons = ["17 4 * * *"]

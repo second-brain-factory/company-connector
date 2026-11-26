@@ -1,0 +1,30 @@
+{
+  "name": "second-brain-connector",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.40.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "CONNECTOR_SECRET": {
+        "description": "64 random characters. Make them with your password manager, or run `openssl rand -hex 32`."
+      },
+      "RESEND_API_KEY": {
+        "description": "Your Resend API key. Invitations and sign-in codes go by email, so nobody can set up or sign in without it."
+      },
+      "CONNECTOR_BASE": {
+        "description": "Your connector's address, such as `https://setup.yourcompany.com`."
+      },
+      "DEPLOY_REPO": {
+        "description": "The name of the repository this makes in your GitHub organisation: keep `second-brain-connector`."
+      },
+      "EMAIL_FROM": {
+        "description": "The sender of invitations and sign-in codes, on a domain verified in Resend, such as `Second Brain <brain@yourcompany.com>`."
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/api/connector"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/__daily",
+      "schedule": "17 4 * * *"
+    }
+  ],
+  "functions": {
+    "api/connector.js": {
+      "maxDuration": 30
+    }
+  }
+}
