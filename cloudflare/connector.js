@@ -244,7 +244,7 @@ ${s.text}`;
 });
 
 // sb:sb-build
-var sb_build_default = { "version": "1.0.1", "licenceKeys": [{ "keyId": "factory-online-2026-11", "publicKey": "hm+64as0SdXVxH9zaLciubV0iEBMJDJV31DsSJpExU4=" }], "releaseKeys": [{ "keyId": "release-2026-11", "publicKey": "rz/A4DpoSKqziuzMY6qmUR7GgCSsXjsiJUfCA1SuicE=" }], "factoryUrl": "https://second-brain-factory.com", "updatesUrl": "https://second-brain-factory.com/api/brain/connector-releases", "content": { "DASHBOARD": `<!doctype html>
+var sb_build_default = { "version": "1.0.2", "licenceKeys": [{ "keyId": "factory-online-2026-11", "publicKey": "hm+64as0SdXVxH9zaLciubV0iEBMJDJV31DsSJpExU4=" }], "releaseKeys": [{ "keyId": "release-2026-11", "publicKey": "rz/A4DpoSKqziuzMY6qmUR7GgCSsXjsiJUfCA1SuicE=" }], "factoryUrl": "https://second-brain-factory.com", "updatesUrl": "https://second-brain-factory.com/api/brain/connector-releases", "content": { "DASHBOARD": `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -3924,6 +3924,7 @@ function gitDeploy({ client, repo, path }) {
 
 // prepared.mjs
 var KIND3 = "company-brain";
+var DIGEST_KIND = "company-brain-digest";
 var MOST_PREPARED_FILES = 200;
 var MOST_PREPARED_FILE = 120 * 1024;
 var MOST_PREPARED_BYTES = 180 * 1024;
@@ -3932,6 +3933,8 @@ var PLACES2 = ["knowledge/", "decisions/", "skills/"];
 var SKILL_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 var LICENCE_ID = /^[A-Za-z0-9_-]{6,80}$/;
 var size = (t) => new TextEncoder().encode(t).length;
+var MOST_BODY_BYTES = 256 * 1024;
+var SHA256 = /^[A-Za-z0-9_-]{43}$/;
 function preparedPath(v) {
   const p = brainPath(v);
   if (!p) return null;
@@ -4008,13 +4011,47 @@ function preparedContract(o) {
     }
   };
 }
+var NOT_SIGNED = "This is not a prepared Brain signed by Second Brain. Copy it again, all of it, from the email or file it came in.";
+var CHANGED = "This prepared Brain is not the one Second Brain signed: it changed after it was signed. Copy it again, all of it, from the email or file it came in.";
+async function openWithDigest(parts, keys2, now) {
+  const d = await openEnvelope(parts.slice(0, 3).join("."), keys2, now);
+  if (!d || d.kind !== DIGEST_KIND || d.v !== 1) return { problem: NOT_SIGNED };
+  if (typeof d.licence !== "string" || !LICENCE_ID.test(d.licence) || typeof d.sha256 !== "string" || !SHA256.test(d.sha256) || !Number.isInteger(d.bytes) || d.bytes < 1 || d.bytes > MOST_BODY_BYTES) return { problem: NOT_SIGNED };
+  if (!/^[A-Za-z0-9_-]+$/.test(parts[3]) || parts[3].length > Math.ceil(MOST_BODY_BYTES * 4 / 3) + 4) return { problem: CHANGED };
+  let bytes;
+  try {
+    bytes = fromB64u(parts[3]);
+  } catch {
+    return { problem: CHANGED };
+  }
+  if (b64u(bytes) !== parts[3] || bytes.length !== d.bytes || await sha256(bytes) !== d.sha256) return { problem: CHANGED };
+  let o;
+  try {
+    o = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    return { problem: CHANGED };
+  }
+  if (!o || typeof o !== "object" || o.licence !== d.licence) return { problem: CHANGED };
+  return { o };
+}
 async function readPrepared(v, keys2, { licence = null, anyLicence = false, now = Date.now() } = {}) {
-  const o = await openEnvelope(v, keys2, now);
-  if (!o) return { problem: "This is not a prepared Brain signed by Second Brain. Copy it again, all of it, from the email or file it came in." };
+  const parts = String(v || "").replace(/\s+/g, "").split(".");
+  let o, text2;
+  if (parts.length === 4) {
+    const r = await openWithDigest(parts, keys2, now);
+    if (r.problem) return r;
+    o = r.o;
+    text2 = parts.join(".");
+  } else {
+    o = await openEnvelope(v, keys2, now);
+    if (!o) return { problem: NOT_SIGNED };
+    if (o.kind === DIGEST_KIND) return { problem: "This is only the signed fingerprint of a prepared Brain, without the Brain itself. Copy it again, all of it, from the email or file it came in." };
+    text2 = envelopeText(envelopeOf(v));
+  }
   const c = preparedContract(o);
   if (c.problem) return c;
   if (!anyLicence && (!licence || c.prepared.licence !== licence.id)) return { problem: `This prepared Brain was made for another company's licence${c.prepared.company ? ` (${c.prepared.company})` : ""}. Ask Second Brain for the one made for yours.` };
-  return { prepared: c.prepared, text: envelopeText(envelopeOf(v)) };
+  return { prepared: c.prepared, text: text2 };
 }
 function companySkillProblem(files) {
   const where = "A company skill goes at skills/<id>/SKILL.md, where <id> is its name in lowercase letters, digits and hyphens, and its other files are Markdown (.md) beside it.";
@@ -4138,6 +4175,10 @@ var loopback = (u) => {
   }
 };
 var allowedRedirect = (u) => typeof u === "string" && (APP_CALLBACKS.includes(u) || /^https:\/\/chatgpt\.com\/connector\/oauth\/[A-Za-z0-9_-]+$/.test(u) || loopback(u));
+var sentence = (t) => {
+  const x = String(t || "").trim();
+  return /[.!?]$/.test(x) ? x : `${x}.`;
+};
 var LICENCE_CHECK = 12 * 36e5;
 var COOKIE = "sb_session";
 var WORKS = { "cloud-first": "In their chat", "local-first": "On their computer" };
@@ -4435,7 +4476,7 @@ Do all of this yourself, and tell me briefly what you are doing. I only want to 
       }
     }
     const u = await up.state();
-    const now2 = u.pending ? `Version ${esc(u.pending.version)} is ${u.pending.rollback ? "coming back" : "installing"}. It takes a few minutes.` : u.available ? `Version ${esc(u.available.version)} is ready${u.available.notes ? `: ${esc(u.available.notes)}` : ""}.` : u.updatesEnded ? `Newer versions came out after ${esc(lic ? lic.updatesUntil : "")}, when your updates ended. Yours keeps working as it is; renew to get them.` : "You have the newest version.";
+    const now2 = u.pending ? `Version ${esc(u.pending.version)} is ${u.pending.rollback ? "coming back" : "installing"}. It takes a few minutes.` : u.available ? `Version ${esc(u.available.version)} is ready${u.available.notes ? `: ${esc(sentence(u.available.notes))}` : "."}` : u.updatesEnded ? `Newer versions came out after ${esc(lic ? lic.updatesUntil : "")}, when your updates ended. Yours keeps working as it is; renew to get them.` : "You have the newest version.";
     const failed = u.failed ? message({ text: `Version ${u.failed.version} did not start, so you are still on ${version}. Nothing was lost.` }) : "";
     const updatesPanel = `<h2>Updates</h2><div class="panel">${failed}<p>${now2}</p><form method="post" action="/admin/updates" class="row"><select name="mode" aria-label="How updates install"><option value="approve"${u.mode === "approve" ? " selected" : ""}>Install when I approve</option><option value="auto"${u.mode === "auto" ? " selected" : ""}>Install by themselves</option></select><button class="quiet" name="do" value="mode">Save</button>${u.available && !u.pending ? '<button name="do" value="install">Install now</button>' : ""}${u.previous && !u.pending ? `<button class="quiet" name="do" value="rollback">Go back to version ${esc(u.previous.version)}</button>` : ""}</form></div>`;
     const cs = p.role === "owner" && ghReady ? await companySetupNow() : null;
