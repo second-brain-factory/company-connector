@@ -77,9 +77,9 @@ One person sets it up and becomes the connector's owner. Before starting, they n
 maximum instances 1, CPU always allocated), so its daily licence check runs. With `DATABASE_URL`, IT installs each
 update, as below.
 
-**Without Docker:** on a server with Node 22.13 or newer, run `node start.mjs` in the `node` folder with the same
-settings and `DATA_DIR` set to a folder that lasts. Nothing needs installing first. Keep it running with what your
-company uses for services, such as systemd.
+**Without Docker:** on a server with Node 22.13 or newer, run `node start.mjs` in the folder that holds
+it, with the same settings and `DATA_DIR` set to a folder that lasts. Nothing needs installing first. Keep it running
+with what your company uses for services, such as systemd.
 
 **Your server's backup:** back up the `second-brain-data` disk, or the Postgres database, as you back up other
 services. **Download the workspace** (below) is a second copy.

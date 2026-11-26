@@ -5447,7 +5447,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 // sb:sb-build
-var sb_build_default = { "version": "1.0.0", "licenceKeys": [{ "keyId": "factory-online-2026-11", "publicKey": "hm+64as0SdXVxH9zaLciubV0iEBMJDJV31DsSJpExU4=" }], "releaseKeys": [{ "keyId": "release-2026-11", "publicKey": "rz/A4DpoSKqziuzMY6qmUR7GgCSsXjsiJUfCA1SuicE=" }], "factoryUrl": "https://second-brain-factory.com", "updatesUrl": "https://second-brain-factory.com/api/brain/connector-releases", "content": { "DASHBOARD": `<!doctype html>
+var sb_build_default = { "version": "1.0.1", "licenceKeys": [{ "keyId": "factory-online-2026-11", "publicKey": "hm+64as0SdXVxH9zaLciubV0iEBMJDJV31DsSJpExU4=" }], "releaseKeys": [{ "keyId": "release-2026-11", "publicKey": "rz/A4DpoSKqziuzMY6qmUR7GgCSsXjsiJUfCA1SuicE=" }], "factoryUrl": "https://second-brain-factory.com", "updatesUrl": "https://second-brain-factory.com/api/brain/connector-releases", "content": { "DASHBOARD": `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -8566,6 +8566,15 @@ function readCompanySetup(source) {
   if (companySetupProblems(v).length) return null;
   return cleaned(v);
 }
+function companySetupJoined(given, was) {
+  const g = readCompanySetup(given);
+  const w = readCompanySetup(was);
+  if (!g || !w) return g;
+  const filled = (v) => Array.isArray(v) ? v.length > 0 : plain(v) ? Object.keys(v).length > 0 : typeof v === "string" ? v.trim() !== "" : v !== null && v !== void 0;
+  const company = { ...w.company };
+  for (const [k, v] of Object.entries(g.company)) if (filled(v)) company[k] = v;
+  return readCompanySetup({ schema: COMPANY_SETUP_SCHEMA, company, prepared: g.prepared || w.prepared });
+}
 function cleaned(v) {
   const c = v.company;
   const name = text(c.name, 120);
@@ -9259,6 +9268,29 @@ ${MAP_TABLE}
   return `${lines2.join("\n")}
 `;
 }
+function skillMapJoined(preparedText, heldText) {
+  const held = mapTable(heldText);
+  if (!held) return preparedText;
+  const t = mapTable(preparedText) || mapTable(`${String(preparedText || "").trim() || "# Skill map"}
+
+${MAP_TABLE}
+`);
+  const ids = new Set(t.lines.slice(t.first, t.end).map((l) => idOf(cellsOf(l)[t.names.indexOf("skill")])));
+  const kept = [];
+  for (let i = held.first; i < held.end; i++) {
+    const cells = cellsOf(held.lines[i]);
+    const id = idOf(cells[held.names.indexOf("skill")]);
+    if (!SKILL_ID.test(id) || ids.has(id)) continue;
+    ids.add(id);
+    kept.push(`| ${t.names.map((n) => {
+      const j = held.names.indexOf(n);
+      return j >= 0 ? cells[j] || "" : "";
+    }).join(" | ")} |`);
+  }
+  t.lines.splice(t.end, 0, ...kept);
+  return `${t.lines.join("\n")}
+`;
+}
 function skillMapWithout(mapText, id) {
   const t = mapTable(mapText);
   if (!t) return mapText;
@@ -9800,6 +9832,7 @@ ${base}/admin` });
     if (leave) return redirect("/", { "set-cookie": clearCookie });
     return adminPage(await people.person(p.id), { ok: true, text: `${x.name} is the owner now, and you are an admin.` });
   }
+  const JOINED = ["skill-map.md", COMPANY_SETUP_FILE];
   async function preparedStep(req, p) {
     const f = await form(req);
     const l = await licence();
@@ -9820,12 +9853,23 @@ ${base}/admin` });
     const holds = readCompanySetup((files.find((x) => x.path === COMPANY_SETUP_FILE) || {}).text || "");
     const heldPeople = holds && holds.prepared && Array.isArray(holds.prepared.people) ? holds.prepared.people.length : 0;
     if (f.get("confirm") !== "yes") {
-      const row = (x) => `<li><code>${esc(x.path)}</code>${there.has(x.path) ? ' <span class="muted">replaces the one there</span>' : ""}</li>`;
-      return html(200, await page("Prepared Brain", `<h1>Add ${esc(name)} to the company Brain?</h1><p>${files.length} files: ${files.filter((x) => !there.has(x.path)).length} new, ${files.filter((x) => there.has(x.path)).length} replacing the ones there. Everything stays in your GitHub, with its history.</p>${holds ? `<p>It sets up <b>${esc(holds.company.brainName || holds.company.name)}</b> for everyone: your company's name, look and what never goes into an AI${heldPeople ? `, and what we prepared for ${heldPeople} of your people` : ""}.</p>` : ""}${skills.length ? `<h2>Skills for everyone</h2><ul>${skills.map((x) => `<li><b>${esc(x.name)}</b>${x.use ? `: ${esc(x.use)}` : ""}</li>`).join("")}</ul>` : ""}<details class="panel"><summary>Every file</summary><ul>${files.map(row).join("")}</ul></details><form method="post" action="/admin/prepared">${hidden({ prepared: r.text, confirm: "yes" })}<button>Add to the company Brain</button></form><p><a href="/admin">Cancel</a></p>`));
+      const joins = (x) => there.has(x.path) && JOINED.includes(x.path);
+      const row = (x) => `<li><code>${esc(x.path)}</code>${joins(x) ? ' <span class="muted">adds to the one there</span>' : there.has(x.path) ? ' <span class="muted">replaces the one there</span>' : ""}</li>`;
+      const joined = files.filter(joins).length;
+      return html(200, await page("Prepared Brain", `<h1>Add ${esc(name)} to the company Brain?</h1><p>${files.length} files: ${files.filter((x) => !there.has(x.path)).length} new, ${files.filter((x) => there.has(x.path) && !joins(x)).length} replacing the ones there${joined ? `, ${joined} adding to the ones there` : ""}. Everything stays in your GitHub, with its history.</p>${holds ? `<p>It sets up <b>${esc(holds.company.brainName || holds.company.name)}</b> for everyone: your company's name, look and what never goes into an AI${heldPeople ? `, and what we prepared for ${heldPeople} of your people` : ""}.</p>` : ""}${skills.length ? `<h2>Skills for everyone</h2><ul>${skills.map((x) => `<li><b>${esc(x.name)}</b>${x.use ? `: ${esc(x.use)}` : ""}</li>`).join("")}</ul>` : ""}<details class="panel"><summary>Every file</summary><ul>${files.map(row).join("")}</ul></details><form method="post" action="/admin/prepared">${hidden({ prepared: r.text, confirm: "yes" })}<button>Add to the company Brain</button></form><p><a href="/admin">Cancel</a></p>`));
     }
     let added;
+    const joinedWith = async (x) => {
+      if (!JOINED.includes(x.path)) return x;
+      const held = await client.read(settings.companyRepo, x.path);
+      if (!held) return x;
+      if (x.path === "skill-map.md") return { path: x.path, text: skillMapJoined(x.text, held.text) };
+      const v = companySetupJoined(x.text, held.text);
+      return v ? { path: x.path, text: `${JSON.stringify(v, null, 2)}
+` } : x;
+    };
     try {
-      added = await changeCompanyBrain(client, settings.companyRepo, async () => ({ files, message: `Add ${name}, prepared by Second Brain`, inline: true }));
+      added = await changeCompanyBrain(client, settings.companyRepo, async () => ({ files: await Promise.all(files.map(joinedWith)), message: `Add ${name}, prepared by Second Brain`, inline: true }));
     } catch (e) {
       return adminPage(p, { text: `The prepared Brain could not be added: ${e.message}` });
     }
