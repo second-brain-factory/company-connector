@@ -1,0 +1,95 @@
+# Publishes a connector release (#4933). The release key is used only here, in the protected `release` environment,
+# after an Approve by a required reviewer. This workflow and the signing code always run from main: the candidate the
+# build pushed is read as data only.
+#
+# Started by hand from main with the version: signs the candidate on the branch candidate/v<version> (pushed by the
+# build in the private repository, which has no key), puts its host folders, files/<version>/ and releases.txt on main,
+# makes the release v<version> with the three app zips, and deletes the candidate branch.
+#
+# Prepared Brains are not signed here: this repository is public, and its run logs and artifacts would show which
+# company a prepared Brain is for.
+#
+# Set up once by an admin: the `release` environment (required reviewers, deployments from main only) with the secret
+# BRAIN_RELEASE_KEY and the variable BRAIN_RELEASE_KEY_ID.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The version the build pushed, such as 1.0.2
+        type: string
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Sign and publish the release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Check the version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: '[[ "$VERSION" =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$ ]] || { echo "::error::version must look like 1.0.2"; exit 1; }'
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: main
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: candidate/v${{ inputs.version }}
+          path: candidate
+          sparse-checkout: .candidate
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Check the candidate
+        env:
+          VERSION: ${{ inputs.version }}
+        run: node main/.release/check-candidate.mjs candidate/.candidate "$VERSION" main/releases.txt
+
+      - name: Sign the list of releases
+        env:
+          BRAIN_RELEASE_KEY: ${{ secrets.BRAIN_RELEASE_KEY }}
+          BRAIN_RELEASE_KEY_ID: ${{ vars.BRAIN_RELEASE_KEY_ID }}
+        run: |
+          node main/.release/sign.mjs release --entry candidate/.candidate/entry.json --previous main/releases.txt \
+            --trusted main/.release/release-keys.json --out "$RUNNER_TEMP/releases.txt"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          C="$GITHUB_WORKSPACE/candidate/.candidate"
+          NOTES="$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).notes)' "$C/entry.json")"
+          cd main
+          for host in cloudflare node vercel; do rm -rf "$host"; cp -R "$C/templates/$host" "$host"; done
+          mkdir -p files && rm -rf "files/$VERSION" && cp -R "$C/files/$VERSION" "files/$VERSION"
+          cp "$RUNNER_TEMP/releases.txt" releases.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A cloudflare node vercel files releases.txt
+          git commit -q -m "Second Brain connector $VERSION"
+          # The zips are in place before the list that names them is.
+          gh release create "v$VERSION" "$C/apps/v$VERSION"/*.zip --repo "$GITHUB_REPOSITORY" --draft --title "Second Brain connector $VERSION" --notes "$NOTES"
+          git push origin HEAD:main
+          gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false --target "$(git rev-parse HEAD)" --latest
+          git push origin --delete "candidate/v$VERSION"
+          echo "Published $VERSION: https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION" >> "$GITHUB_STEP_SUMMARY"
